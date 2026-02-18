@@ -107,8 +107,8 @@ export default function UploadScreen() {
   }
 
   function generateShareLink(token: string, imgTitle: string) {
-    const domain = process.env.EXPO_PUBLIC_DOMAIN?.replace(":5000", "") || "";
-    const link = `https://${domain}/api/share/${token}`;
+    const baseUrl = getApiUrl();
+    const link = `${baseUrl}api/share/${token}`;
     setShareLink(link);
     setUploadedTitle(imgTitle);
   }

@@ -61,8 +61,7 @@ export default function ImageDetailScreen() {
 
   const baseUrl = getApiUrl();
   const imageUrl = `${baseUrl}uploads/${image.filename}`;
-  const domain = process.env.EXPO_PUBLIC_DOMAIN?.replace(":5000", "") || "";
-  const shareLink = `https://${domain}/api/share/${image.shareToken}`;
+  const shareLink = `${baseUrl}api/share/${image.shareToken}`;
 
   function formatBytes(bytes: number): string {
     if (bytes === 0) return "0 B";

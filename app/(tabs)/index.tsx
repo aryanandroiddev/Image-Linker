@@ -90,9 +90,8 @@ export default function GalleryScreen() {
   }, []);
 
   function handleLongPress(item: ImageItem) {
-    const protocol = Platform.OS === "web" ? window.location.protocol : "https:";
-    const host = Platform.OS === "web" ? window.location.host : process.env.EXPO_PUBLIC_DOMAIN?.replace(":5000", "") || "";
-    const shareUrl = `${protocol}//${host}/api/share/${item.shareToken}`;
+    const baseUrl = getApiUrl();
+    const shareUrl = `${baseUrl}api/share/${item.shareToken}`;
 
     Alert.alert(item.title, "What would you like to do?", [
       {
