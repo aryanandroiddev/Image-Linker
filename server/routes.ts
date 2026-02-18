@@ -6,6 +6,7 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import { randomUUID } from "crypto";
+import express from "express";
 import { storage } from "./storage";
 
 declare module "express-session" {
@@ -39,11 +40,33 @@ const upload = multer({
   },
 });
 
+const authTokens = new Map<string, string>();
+
+function generateToken(): string {
+  return randomUUID() + "-" + randomUUID();
+}
+
 function requireAuth(req: Request, res: Response, next: Function) {
-  if (!req.session.userId) {
-    return res.status(401).json({ message: "Not authenticated" });
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    const token = authHeader.slice(7);
+    const userId = authTokens.get(token);
+    if (userId) {
+      (req as any).userId = userId;
+      return next();
+    }
   }
-  next();
+
+  if (req.session?.userId) {
+    (req as any).userId = req.session.userId;
+    return next();
+  }
+
+  return res.status(401).json({ message: "Not authenticated" });
+}
+
+function getUserId(req: Request): string {
+  return (req as any).userId;
 }
 
 async function seedSampleData() {
@@ -58,29 +81,18 @@ async function seedSampleData() {
   });
 
   const sampleImages = [
-    { title: "Mountain Sunrise", color: "#FF6B35", shape: "triangle" },
-    { title: "Ocean Waves", color: "#0EA5E9", shape: "wave" },
-    { title: "City Lights", color: "#8B5CF6", shape: "grid" },
-    { title: "Forest Trail", color: "#10B981", shape: "tree" },
-    { title: "Golden Desert", color: "#F59E0B", shape: "circle" },
+    { title: "Mountain Sunrise", color: "#FF6B35" },
+    { title: "Ocean Waves", color: "#0EA5E9" },
+    { title: "City Lights", color: "#8B5CF6" },
+    { title: "Forest Trail", color: "#10B981" },
+    { title: "Golden Desert", color: "#F59E0B" },
   ];
 
   for (const img of sampleImages) {
     const filename = `sample_${randomUUID()}.png`;
     const filepath = path.join(uploadsDir, filename);
-
-    const svg = generateSampleSvg(img.color, img.shape, img.title);
-    const { createCanvas } = await import("canvas").catch(() => ({ createCanvas: null }));
-
-    if (!createCanvas) {
-      const pngBuffer = generateSimplePng(img.color);
-      fs.writeFileSync(filepath, pngBuffer);
-    }
-
-    if (!fs.existsSync(filepath)) {
-      const pngBuffer = generateSimplePng(img.color);
-      fs.writeFileSync(filepath, pngBuffer);
-    }
+    const pngBuffer = generateSimplePng(img.color);
+    fs.writeFileSync(filepath, pngBuffer);
 
     await storage.createImage({
       userId: user.id,
@@ -93,13 +105,6 @@ async function seedSampleData() {
   }
 
   console.log("Sample data seeded: user=demo, password=demo123");
-}
-
-function generateSampleSvg(color: string, shape: string, title: string): string {
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600">
-    <rect width="800" height="600" fill="${color}"/>
-    <text x="400" y="300" text-anchor="middle" fill="white" font-size="40" font-family="Arial">${title}</text>
-  </svg>`;
 }
 
 function generateSimplePng(color: string): Buffer {
@@ -171,11 +176,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       secret: process.env.SESSION_SECRET || "pixeldrop-secret-key",
       resave: false,
       saveUninitialized: false,
+      proxy: true,
       cookie: {
         secure: false,
         httpOnly: true,
         maxAge: 7 * 24 * 60 * 60 * 1000,
-        sameSite: "lax",
+        sameSite: "lax" as const,
       },
     })
   );
@@ -208,12 +214,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.createUser({ username, email, password: hashedPassword });
 
       req.session.userId = user.id;
+      const token = generateToken();
+      authTokens.set(token, user.id);
 
       return res.json({
         id: user.id,
         username: user.username,
         email: user.email,
         createdAt: user.createdAt,
+        token,
       });
     } catch (error) {
       console.error("Register error:", error);
@@ -240,12 +249,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       req.session.userId = user.id;
+      const token = generateToken();
+      authTokens.set(token, user.id);
 
       return res.json({
         id: user.id,
         username: user.username,
         email: user.email,
         createdAt: user.createdAt,
+        token,
       });
     } catch (error) {
       console.error("Login error:", error);
@@ -261,8 +273,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Email is required" });
       }
 
-      const user = await storage.getUserByEmail(email);
-
       return res.json({
         message: "If an account exists with that email, a password reset link has been sent.",
       });
@@ -274,11 +284,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/auth/me", async (req: Request, res: Response) => {
     try {
-      if (!req.session.userId) {
+      let userId: string | undefined;
+
+      const authHeader = req.headers.authorization;
+      if (authHeader && authHeader.startsWith("Bearer ")) {
+        const token = authHeader.slice(7);
+        userId = authTokens.get(token);
+      }
+
+      if (!userId && req.session?.userId) {
+        userId = req.session.userId;
+      }
+
+      if (!userId) {
         return res.status(401).json({ message: "Not authenticated" });
       }
 
-      const user = await storage.getUser(req.session.userId);
+      const user = await storage.getUser(userId);
       if (!user) {
         return res.status(401).json({ message: "User not found" });
       }
@@ -296,6 +318,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.post("/api/auth/logout", (req: Request, res: Response) => {
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      const token = authHeader.slice(7);
+      authTokens.delete(token);
+    }
+
     req.session.destroy((err) => {
       if (err) {
         return res.status(500).json({ message: "Failed to logout" });
@@ -307,7 +335,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/images", requireAuth, async (req: Request, res: Response) => {
     try {
-      const imgs = await storage.getImagesByUserId(req.session.userId!);
+      const imgs = await storage.getImagesByUserId(getUserId(req));
       return res.json(imgs);
     } catch (error) {
       console.error("Get images error:", error);
@@ -325,7 +353,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const shareToken = randomUUID().replace(/-/g, "").slice(0, 12);
 
       const image = await storage.createImage({
-        userId: req.session.userId!,
+        userId: getUserId(req),
         title,
         filename: req.file.filename,
         shareToken,
@@ -343,7 +371,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/images/:id", requireAuth, async (req: Request, res: Response) => {
     try {
       const image = await storage.getImageById(req.params.id);
-      if (!image || image.userId !== req.session.userId) {
+      if (!image || image.userId !== getUserId(req)) {
         return res.status(404).json({ message: "Image not found" });
       }
 
@@ -352,7 +380,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         fs.unlinkSync(filepath);
       }
 
-      await storage.deleteImage(req.params.id, req.session.userId!);
+      await storage.deleteImage(req.params.id, getUserId(req));
       return res.json({ message: "Image deleted" });
     } catch (error) {
       console.error("Delete error:", error);
@@ -385,8 +413,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   const httpServer = createServer(app);
   return httpServer;
 }
-
-import express from "express";
 
 function getSharePageHtml(title: string, imageUrl: string, username: string, createdAt: Date): string {
   const dateStr = new Date(createdAt).toLocaleDateString("en-US", {

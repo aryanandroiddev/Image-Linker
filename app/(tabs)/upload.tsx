@@ -18,7 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { File } from "expo-file-system";
 import { fetch as expoFetch } from "expo/fetch";
-import { getApiUrl, queryClient } from "@/lib/query-client";
+import { getApiUrl, getAuthToken, queryClient } from "@/lib/query-client";
 
 export default function UploadScreen() {
   const insets = useSafeAreaInsets();
@@ -58,6 +58,12 @@ export default function UploadScreen() {
       const formData = new FormData();
       formData.append("title", imageTitle);
 
+      const token = getAuthToken();
+      const authHeaders: Record<string, string> = {};
+      if (token) {
+        authHeaders["Authorization"] = `Bearer ${token}`;
+      }
+
       if (Platform.OS === "web") {
         const response = await window.fetch(imageUri);
         const blob = await response.blob();
@@ -66,6 +72,7 @@ export default function UploadScreen() {
         const uploadRes = await window.fetch(url.toString(), {
           method: "POST",
           body: formData,
+          headers: authHeaders,
           credentials: "include",
         });
 
@@ -83,7 +90,7 @@ export default function UploadScreen() {
         const uploadRes = await expoFetch(url.toString(), {
           method: "POST",
           body: formData,
-          credentials: "include",
+          headers: authHeaders,
         });
 
         if (!uploadRes.ok) {
