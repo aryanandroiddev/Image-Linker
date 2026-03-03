@@ -49,6 +49,5 @@
 - **Database Rules**: To enhance privacy, update your Firebase Storage rules to allow only the owner to delete images.
 
 ## 📜 License
-
-   
+This repository does not include a license file by default. If you want a permissive license, add an LICENSE (for example MIT). Ask me and I can add one.
    
